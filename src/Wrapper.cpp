@@ -272,6 +272,12 @@ void CPythonObject::NamedGetter(v8::Local<v8::String> prop, const v8::PropertyCa
   v8::String::Utf8Value name(prop);
 
   if (PyGen_Check(obj.ptr())) CALLBACK_RETURN(v8::Undefined(info.GetIsolate()));
+  
+  if (name.length() && **name == '_')
+  {
+    // return None for every attribute starting with "_"
+    CALLBACK_RETURN(v8::Handle<v8::Value>());
+  }
 
   PyObject *value = ::PyObject_GetAttrString(obj.ptr(), *name);
 
@@ -330,6 +336,13 @@ void CPythonObject::NamedSetter(v8::Local<v8::String> prop, v8::Local<v8::Value>
   py::object obj = CJavascriptObject::Wrap(info.Holder());
 
   v8::String::Utf8Value name(prop);
+  
+  if (name.length() && **name == '_')
+  {
+    // return None for every attribute starting with "_"
+    CALLBACK_RETURN(value);
+  }
+  
   py::object newval = CJavascriptObject::Wrap(value);
 
   bool found = 1 == ::PyObject_HasAttrString(obj.ptr(), *name);
@@ -390,9 +403,19 @@ void CPythonObject::NamedQuery(v8::Local<v8::String> prop, const v8::PropertyCal
   py::object obj = CJavascriptObject::Wrap(info.Holder());
 
   v8::String::Utf8Value name(prop);
-
-  bool exists = PyGen_Check(obj.ptr()) || ::PyObject_HasAttrString(obj.ptr(), *name) ||
-                (::PyMapping_Check(obj.ptr()) && ::PyMapping_HasKeyString(obj.ptr(), *name));
+  
+  bool exists;
+  
+  if (name.length() && **name == '_')
+  {
+    // return None for every attribute starting with "_"
+    exists = false;
+  }
+  else
+  {
+    exists = PyGen_Check(obj.ptr()) || ::PyObject_HasAttrString(obj.ptr(), *name) ||
+             (::PyMapping_Check(obj.ptr()) && ::PyMapping_HasKeyString(obj.ptr(), *name));
+  }
 
   if (exists) CALLBACK_RETURN(v8::Integer::New(info.GetIsolate(), v8::None));
 
@@ -410,6 +433,10 @@ void CPythonObject::NamedDeleter(v8::Local<v8::String> prop, const v8::PropertyC
   py::object obj = CJavascriptObject::Wrap(info.Holder());
 
   v8::String::Utf8Value name(prop);
+  if (name.length() && **name == '_')
+  {
+    CALLBACK_RETURN(false);
+  }
 
   if (!::PyObject_HasAttrString(obj.ptr(), *name) &&
       ::PyMapping_Check(obj.ptr()) &&
@@ -499,7 +526,7 @@ void CPythonObject::NamedEnumerator(const v8::PropertyCallbackInfo<v8::Array>& i
 
         // FIXME Are there any methods to avoid such a dirty work?
 
-        if (name.startswith("__") && name.endswith("__"))
+        if (name.startswith("_"))
           continue;
       }
 
