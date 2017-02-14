@@ -273,6 +273,14 @@ void CPythonObject::NamedGetter(v8::Local<v8::String> prop, const v8::PropertyCa
 
   if (PyGen_Check(obj.ptr())) CALLBACK_RETURN(v8::Undefined(info.GetIsolate()));
 
+  if (::PyMapping_Check(obj.ptr()) &&
+      ::PyMapping_HasKeyString(obj.ptr(), *name))
+  {
+    py::object result(py::handle<>(::PyMapping_GetItemString(obj.ptr(), *name)));
+
+    if (!result.is_none()) CALLBACK_RETURN(Wrap(result));
+  }
+
   PyObject *value = ::PyObject_GetAttrString(obj.ptr(), *name);
 
   if (!value)
@@ -288,15 +296,7 @@ void CPythonObject::NamedGetter(v8::Local<v8::String> prop, const v8::PropertyCa
         py::throw_error_already_set();
       }
     }
-
-    if (::PyMapping_Check(obj.ptr()) &&
-        ::PyMapping_HasKeyString(obj.ptr(), *name))
-    {
-      py::object result(py::handle<>(::PyMapping_GetItemString(obj.ptr(), *name)));
-
-      if (!result.is_none()) CALLBACK_RETURN(Wrap(result));
-    }
-
+    
     CALLBACK_RETURN(v8::Handle<v8::Value>());
   }
 
