@@ -15,6 +15,9 @@
 #include "Context.h"
 #include "Utils.h"
 
+#include <unistd.h>
+#include <signal.h>
+
 #define TERMINATE_EXECUTION_CHECK(returnValue) \
   if(v8::V8::IsExecutionTerminating()) { \
     ::PyErr_Clear(); \
@@ -112,12 +115,14 @@ void CWrapper::Expose(void)
     .def("apply", &CJavascriptFunction::ApplyPython,
          (py::arg("self"),
           py::arg("args") = py::list(),
-          py::arg("kwds") = py::dict()),
+          py::arg("kwds") = py::dict(),
+          py::arg("timeout") = py::long_(0)),
           "Performs a function call using the parameters.")
     .def("invoke", &CJavascriptFunction::Invoke,
           (py::arg("args") = py::list(),
-           py::arg("kwds") = py::dict()),
-          "Performs a binding method call using the parameters.")
+           py::arg("kwds") = py::dict(),
+           py::arg("timeout") = py::long_(0)),
+           "Performs a binding method call using the parameters.")
 
     .def("setName", &CJavascriptFunction::SetName)
 
@@ -1683,22 +1688,78 @@ py::object CJavascriptFunction::CreateWithArgs(CJavascriptFunctionPtr proto, py:
   return CJavascriptObject::Wrap(result);
 }
 
-py::object CJavascriptFunction::ApplyJavascript(CJavascriptObjectPtr self, py::list args, py::dict kwds)
+static bool ApplyJavascriptTimeout = false;
+
+void TerminateExecution(int sig)
 {
-  CHECK_V8_CONTEXT();
-
-  v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
-
-  return Call(self->Object(), args, kwds);
+    ApplyJavascriptTimeout = true;
+    v8::V8::TerminateExecution(v8::Isolate::GetCurrent());
 }
 
-py::object CJavascriptFunction::ApplyPython(py::object self, py::list args, py::dict kwds)
+inline void SetupAlarmHook(long timeout)
+{
+    ApplyJavascriptTimeout = false;
+    signal(SIGALRM, TerminateExecution);
+    ualarm((useconds_t)(timeout * 1000), (useconds_t)0);
+}
+
+inline void CheckAlarm()
+{
+    signal(SIGALRM, SIG_IGN);
+    ualarm((useconds_t)0, (useconds_t)0);
+    
+    if (ApplyJavascriptTimeout)
+    {
+        ApplyJavascriptTimeout = false;
+        
+        throw CJavascriptTimeoutException("Javascript function call timeout");
+    }
+}
+
+py::object CJavascriptFunction::ApplyJavascript(CJavascriptObjectPtr self, py::list args, py::dict kwds, py::long_ timeout)
 {
   CHECK_V8_CONTEXT();
 
   v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
+  
+  long timeout_ = py::extract<long>(timeout);
+  
+  if (timeout_ > 0)
+  {
+     SetupAlarmHook(timeout_);
+  }
+  
+  py::object result = Call(self->Object(), args, kwds);
+  
+  if (timeout_ > 0)
+  {
+     CheckAlarm();
+  }
+  
+  return result;
+}
 
-  return Call(CPythonObject::Wrap(self)->ToObject(), args, kwds);
+py::object CJavascriptFunction::ApplyPython(py::object self, py::list args, py::dict kwds, py::long_ timeout)
+{
+  CHECK_V8_CONTEXT();
+
+  v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
+  
+  long timeout_ = py::extract<long>(timeout);
+  
+  if (timeout_ > 0)
+  {
+     SetupAlarmHook(timeout_);
+  }
+
+  py::object result = Call(CPythonObject::Wrap(self)->ToObject(), args, kwds);
+  
+  if (timeout_ > 0)
+  {
+     CheckAlarm();
+  }
+  
+  return result;
 }
 
 py::object CJavascriptFunction::Invoke(py::list args, py::dict kwds)
