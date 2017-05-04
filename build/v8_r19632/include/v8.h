@@ -5551,7 +5551,7 @@ Handle<T> Handle<T>::New(Isolate* isolate, T* that) {
   if (that == NULL) return Handle<T>();
   T* that_ptr = that;
   internal::Object** p = reinterpret_cast<internal::Object**>(that_ptr);
-  return Handle<T>(reinterpret_cast<T*>(HandleScope::CreateHandle(
+  return Handle<T>(reinterpret_cast<T*>(Local<T>::New(
       reinterpret_cast<internal::Isolate*>(isolate), *p)));
 }
 
