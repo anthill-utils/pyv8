@@ -115,7 +115,13 @@ class JSError(Exception):
     def frames(self):
         return self.parse_stack(self.stackTrace)
 
+
+class JSTimeoutError(Exception):
+    pass
+
+
 _PyV8._JSError._jsclass = JSError
+_PyV8._JSTimeoutError._jsclass = JSTimeoutError
 
 JSObject = _PyV8.JSObject
 JSNull = _PyV8.JSNull

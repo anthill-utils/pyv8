@@ -191,8 +191,8 @@ public:
   static py::object CallWithArgs(py::tuple args, py::dict kwds);
   static py::object CreateWithArgs(CJavascriptFunctionPtr proto, py::tuple args, py::dict kwds);
 
-  py::object ApplyJavascript(CJavascriptObjectPtr self, py::list args, py::dict kwds);
-  py::object ApplyPython(py::object self, py::list args, py::dict kwds);
+  py::object ApplyJavascript(CJavascriptObjectPtr self, py::list args, py::dict kwds, py::long_ timeout);
+  py::object ApplyPython(py::object self, py::list args, py::dict kwds, py::long_ timeout);
   py::object Invoke(py::list args, py::dict kwds);
 
   const std::string GetName(void) const;
