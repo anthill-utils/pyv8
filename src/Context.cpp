@@ -50,12 +50,14 @@ void CContext::Expose(void)
                                        py::arg("name") = std::string(),
                                        py::arg("line") = -1,
                                        py::arg("col") = -1,
-                                       py::arg("precompiled") = py::object()))
+                                       py::arg("precompiled") = py::object(),
+                                       py::arg("timeout") = py::long_(0)))
     .def("eval", &CContext::EvaluateW, (py::arg("source"),
                                         py::arg("name") = std::wstring(),
                                         py::arg("line") = -1,
                                         py::arg("col") = -1,
-                                        py::arg("precompiled") = py::object()))
+                                        py::arg("precompiled") = py::object(),
+                                        py::arg("timeout") = py::long_(0)))
 
     .def("enter", &CContext::Enter, "Enter this context. "
          "After entering a context, all code compiled and "
@@ -205,26 +207,78 @@ py::object CContext::GetCalling(void)
     py::object(py::handle<>(boost::python::converter::shared_ptr_to_python<CContext>(CContextPtr(new CContext(calling)))));
 }
 
+static bool EvaluationTimeout = false;
+
+void TerminateEvaluation(int sig)
+{
+    EvaluationTimeout = true;
+    v8::V8::TerminateExecution(v8::Isolate::GetCurrent());
+}
+
+inline void SetupEvaluationAlarmHook(long timeout)
+{
+    EvaluationTimeout = false;
+    signal(SIGALRM, TerminateEvaluation);
+    ualarm((useconds_t)(timeout * 1000), (useconds_t)0);
+}
+
+inline void CheckEvaluationAlarm()
+{
+    signal(SIGALRM, SIG_IGN);
+    ualarm((useconds_t)0, (useconds_t)0);
+    
+    if (EvaluationTimeout)
+    {
+        EvaluationTimeout = false;
+        
+        throw CJavascriptTimeoutException("Javascript evaluation timeout");
+    }
+}
+
 py::object CContext::Evaluate(const std::string& src,
                               const std::string name,
                               int line, int col,
-                              py::object precompiled)
+                              py::object precompiled, long timeout)
 {
   CEngine engine(v8::Isolate::GetCurrent());
 
   CScriptPtr script = engine.Compile(src, name, line, col, precompiled);
 
-  return script->Run();
+  if (timeout > 0)
+  {
+     SetupEvaluationAlarmHook(timeout);
+  }
+  
+  py::object result = script->Run();
+  
+  if (timeout > 0)
+  {
+     CheckEvaluationAlarm();
+  }
+  
+  return result;
 }
 
 py::object CContext::EvaluateW(const std::wstring& src,
                                const std::wstring name,
                                int line, int col,
-                               py::object precompiled)
+                               py::object precompiled, long timeout)
 {
   CEngine engine(v8::Isolate::GetCurrent());
 
   CScriptPtr script = engine.CompileW(src, name, line, col, precompiled);
 
-  return script->Run();
+  if (timeout > 0)
+  {
+     SetupEvaluationAlarmHook(timeout);
+  }
+  
+  py::object result = script->Run();
+  
+  if (timeout > 0)
+  {
+     CheckEvaluationAlarm();
+  }
+  
+  return result;
 }
