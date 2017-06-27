@@ -11,19 +11,19 @@
 #include "Locker.h"
 #include "V8Internal.h"
 
-v8::Handle<v8::String> ToString(const std::string& str)
+v8::Handle<v8::String> ToString(const std::string& str, v8::Isolate* isolate)
 {
-  v8::EscapableHandleScope scope(v8::Isolate::GetCurrent());
+  v8::EscapableHandleScope scope(isolate);
 
-  return scope.Escape(v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), str.c_str(), v8::String::kNormalString, str.size()));
+  return scope.Escape(v8::String::NewFromUtf8(isolate, str.c_str(), v8::String::kNormalString, str.size()));
 }
-v8::Handle<v8::String> ToString(const std::wstring& str)
+v8::Handle<v8::String> ToString(const std::wstring& str, v8::Isolate* isolate)
 {
-  v8::EscapableHandleScope scope(v8::Isolate::GetCurrent());
+  v8::EscapableHandleScope scope(isolate);
 
   if (sizeof(wchar_t) == sizeof(uint16_t))
   {
-    return scope.Escape(v8::String::NewFromTwoByte(v8::Isolate::GetCurrent(), (const uint16_t *) str.c_str(), v8::String::kNormalString, str.size()));
+    return scope.Escape(v8::String::NewFromTwoByte(isolate, (const uint16_t *) str.c_str(), v8::String::kNormalString, str.size()));
   }
 
   std::vector<uint16_t> data(str.size()+1);
@@ -35,21 +35,21 @@ v8::Handle<v8::String> ToString(const std::wstring& str)
 
   data[str.size()] = 0;
 
-  return scope.Escape(v8::String::NewFromTwoByte(v8::Isolate::GetCurrent(), &data[0], v8::String::kNormalString, str.size()));
+  return scope.Escape(v8::String::NewFromTwoByte(isolate, &data[0], v8::String::kNormalString, str.size()));
 }
-v8::Handle<v8::String> ToString(py::object str)
+v8::Handle<v8::String> ToString(py::object str, v8::Isolate* isolate)
 {
-  v8::EscapableHandleScope scope(v8::Isolate::GetCurrent());
+  v8::EscapableHandleScope scope(isolate);
 
   if (PyBytes_CheckExact(str.ptr()))
   {
-    return scope.Escape(v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), PyBytes_AS_STRING(str.ptr()), v8::String::kNormalString, PyBytes_GET_SIZE(str.ptr())));
+    return scope.Escape(v8::String::NewFromUtf8(isolate, PyBytes_AS_STRING(str.ptr()), v8::String::kNormalString, PyBytes_GET_SIZE(str.ptr())));
   }
 
   if (PyUnicode_CheckExact(str.ptr()))
   {
   #ifndef Py_UNICODE_WIDE
-    return scope.Escape(v8::String::NewFromTwoByte(v8::Isolate::GetCurrent(),
+    return scope.Escape(v8::String::NewFromTwoByte(isolate,
       reinterpret_cast<const uint16_t *>(PyUnicode_AS_UNICODE(str.ptr()))));
 
   #else
@@ -65,16 +65,16 @@ v8::Handle<v8::String> ToString(py::object str)
 
     data[len] = 0;
 
-    return scope.Escape(v8::String::NewFromTwoByte(v8::Isolate::GetCurrent(), &data[0], v8::String::kNormalString, len));
+    return scope.Escape(v8::String::NewFromTwoByte(isolate, &data[0], v8::String::kNormalString, len));
   #endif
   }
 
-  return ToString(py::object(py::handle<>(::PyObject_Str(str.ptr()))));
+  return ToString(py::object(py::handle<>(::PyObject_Str(str.ptr()))), isolate);
 }
 
-v8::Handle<v8::String> DecodeUtf8(const std::string& str)
+v8::Handle<v8::String> DecodeUtf8(const std::string& str, v8::Isolate* isolate)
 {
-  v8::EscapableHandleScope scope(v8::Isolate::GetCurrent());
+  v8::EscapableHandleScope scope(isolate);
 
   std::vector<uint16_t> data;
 
@@ -82,15 +82,15 @@ v8::Handle<v8::String> DecodeUtf8(const std::string& str)
   {
     utf8::utf8to16(str.begin(), str.end(), std::back_inserter(data));
 
-    return scope.Escape(v8::String::NewFromTwoByte(v8::Isolate::GetCurrent(), &data[0], v8::String::kNormalString, data.size()));
+    return scope.Escape(v8::String::NewFromTwoByte(isolate, &data[0], v8::String::kNormalString, data.size()));
   }
   catch (const std::exception&)
   {
-  	return scope.Escape(v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), str.c_str(), v8::String::kNormalString, str.size()));
+  	return scope.Escape(v8::String::NewFromUtf8(isolate, str.c_str(), v8::String::kNormalString, str.size()));
   }
 }
 
-const std::string EncodeUtf8(const std::wstring& str)
+const std::string EncodeUtf8(const std::wstring& str, v8::Isolate* isolate)
 {
   std::vector<uint8_t> data;
 

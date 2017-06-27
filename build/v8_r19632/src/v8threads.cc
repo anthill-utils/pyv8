@@ -89,6 +89,9 @@ bool Locker::IsLocked(v8::Isolate* isolate) {
   return internal_isolate->thread_manager()->IsLockedByCurrentThread();
 }
 
+void Locker::ResetActive() {
+  active_ = false;
+}
 
 bool Locker::IsActive() {
   return active_;

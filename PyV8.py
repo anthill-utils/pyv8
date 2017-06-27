@@ -116,17 +116,33 @@ class JSError(Exception):
         return self.parse_stack(self.stackTrace)
 
 
-class JSTimeoutError(Exception):
-    pass
+class JSArray(_PyV8.JSArray):
+    def __init__(self, items, isolate=None):
+        if isolate is None:
+            _PyV8.JSArray.__init__(self, items)
+        else:
+            _PyV8.JSArray.__init__(self, isolate, items)
+
+
+class JSUndefined(_PyV8.JSUndefined):
+    def __init__(self, isolate=None):
+        if isolate is None:
+            _PyV8.JSUndefined.__init__(self)
+        else:
+            _PyV8.JSUndefined.__init__(self, isolate)
+
+
+class JSNull(_PyV8.JSNull):
+    def __init__(self, isolate=None):
+        if isolate is None:
+            _PyV8.JSNull.__init__(self)
+        else:
+            _PyV8.JSNull.__init__(self, isolate)
 
 
 _PyV8._JSError._jsclass = JSError
-_PyV8._JSTimeoutError._jsclass = JSTimeoutError
 
 JSObject = _PyV8.JSObject
-JSNull = _PyV8.JSNull
-JSUndefined = _PyV8.JSUndefined
-JSArray = _PyV8.JSArray
 JSFunction = _PyV8.JSFunction
 
 # contribute by e.generalov
@@ -166,18 +182,9 @@ class JSExtension(_PyV8.JSExtension):
 class JSLocker(_PyV8.JSLocker):
     def __enter__(self):
         self.enter()
-
-        if JSContext.entered:
-            self.leave()
-            raise RuntimeError("Lock should be acquired before enter the context")
-
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if JSContext.entered:
-            self.leave()
-            raise RuntimeError("Lock should be released after leave the context")
-
         self.leave()
 
     if is_py3k:
@@ -692,16 +699,16 @@ class JSDebugger(JSDebugProtocol, JSDebugEvent):
         return True
 
     def debugBreak(self):
-        _PyV8.debug().debugBreak()
+        self.debug.debugBreak()
 
     def debugBreakForCommand(self):
-        _PyV8.debug().debugBreakForCommand()
+        self.debug.debugBreakForCommand()
 
     def cancelDebugBreak(self):
-        _PyV8.debug().cancelDebugBreak()
+        self.debug.cancelDebugBreak()
 
     def processDebugMessages(self):
-        _PyV8.debug().processDebugMessages()
+        self.debug.processDebugMessages()
 
     def sendCommand(self, cmd, *args, **kwds):
         request = json.dumps({
@@ -711,7 +718,7 @@ class JSDebugger(JSDebugProtocol, JSDebugEvent):
             'arguments': kwds
         })
 
-        _PyV8.debug().sendCommand(request)
+        self.debug.sendCommand(request)
 
         return request
 
@@ -740,8 +747,11 @@ JSAllocationAction = _PyV8.JSAllocationAction
 
 
 class JSEngine(_PyV8.JSEngine):
-    def __init__(self):
-        _PyV8.JSEngine.__init__(self)
+    def __init__(self, isolate=None):
+        if isolate:
+            _PyV8.JSEngine.__init__(self, isolate)
+        else:
+            _PyV8.JSEngine.__init__(self)
 
     def __enter__(self):
         return self
@@ -770,15 +780,14 @@ class JSIsolate(_PyV8.JSIsolate):
 
 
 class JSContext(_PyV8.JSContext):
-    def __init__(self, obj=None, extensions=None, ctxt=None):
-        if JSLocker.active:
-            self.lock = JSLocker()
-            self.lock.enter()
-
+    def __init__(self, obj=None, extensions=None, isolate=None, ctxt=None):
         if ctxt:
             _PyV8.JSContext.__init__(self, ctxt)
         else:
-            _PyV8.JSContext.__init__(self, obj, extensions or [])
+            if isolate:
+                _PyV8.JSContext.__init__(self, obj, extensions or [], isolate)
+            else:
+                _PyV8.JSContext.__init__(self, obj, extensions or [])
 
     def __enter__(self):
         self.enter()
@@ -787,21 +796,20 @@ class JSContext(_PyV8.JSContext):
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.leave()
-
-        if hasattr(JSLocker, 'lock'):
-            self.lock.leave()
-            self.lock = None
-
         del self
 
 
 # contribute by marc boeker <http://code.google.com/u/marc.boeker/>
 def convert(obj):
-    if type(obj) == _PyV8.JSArray:
+    if type(obj) == _PyV8.JSArray or type(obj) == JSArray:
         return [convert(v) for v in obj]
 
+    if type(obj) == _PyV8.JSFunction:
+        return "[function Function]"
+
     if type(obj) == _PyV8.JSObject:
-        return dict([[str(k), convert(obj.__getattr__(str(k)))] for k in (obj.__dir__() if is_py3k else obj.__members__)])
+        return dict([[str(k), convert(obj.__getattr__(str(k)))]
+                     for k in (obj.__dir__() if is_py3k else obj.__members__)])
 
     return obj
 
@@ -883,8 +891,11 @@ else:
 
 class TestContext(unittest.TestCase):
     def testMultiNamespace(self):
-        self.assertTrue(not bool(JSContext.inContext))
-        self.assertTrue(not bool(JSContext.entered))
+
+        default = JSIsolate.default
+
+        self.assertTrue(not bool(default.inContext))
+        self.assertTrue(not bool(default.entered))
 
         class Global(object):
             name = "global"
@@ -892,9 +903,9 @@ class TestContext(unittest.TestCase):
         g = Global()
 
         with JSContext(g) as ctxt:
-            self.assertTrue(bool(JSContext.inContext))
-            self.assertEqual(g.name, str(JSContext.entered.locals.name))
-            self.assertEqual(g.name, str(JSContext.current.locals.name))
+            self.assertTrue(bool(default.inContext))
+            self.assertEqual(g.name, str(default.entered.locals.name))
+            self.assertEqual(g.name, str(default.current.locals.name))
 
             class Local(object):
                 name = "local"
@@ -902,16 +913,16 @@ class TestContext(unittest.TestCase):
             l = Local()
 
             with JSContext(l):
-                self.assertTrue(bool(JSContext.inContext))
-                self.assertEqual(l.name, str(JSContext.entered.locals.name))
-                self.assertEqual(l.name, str(JSContext.current.locals.name))
+                self.assertTrue(bool(default.inContext))
+                self.assertEqual(l.name, str(default.entered.locals.name))
+                self.assertEqual(l.name, str(default.current.locals.name))
 
-            self.assertTrue(bool(JSContext.inContext))
+            self.assertTrue(bool(default.inContext))
             #self.assertEqual(g.name, str(JSContext.entered.locals.name))
-            self.assertEqual(g.name, str(JSContext.current.locals.name))
+            self.assertEqual(g.name, str(default.current.locals.name))
 
-        self.assertTrue(not bool(JSContext.entered))
-        self.assertTrue(not bool(JSContext.inContext))
+        self.assertTrue(not bool(default.entered))
+        self.assertTrue(not bool(default.inContext))
 
     def _testMultiContext(self):
         # Create an environment
@@ -1121,8 +1132,8 @@ class TestWrapper(unittest.TestCase):
             self.assertEqual(int, type(ctxt.eval("123")))
             self.assertEqual(float, type(ctxt.eval("3.14")))
             self.assertEqual(datetime, type(ctxt.eval("new Date()")))
-            self.assertEqual(JSArray, type(ctxt.eval("[1, 2, 3]")))
-            self.assertEqual(JSFunction, type(ctxt.eval("(function() {})")))
+            self.assertEqual(_PyV8.JSArray, type(ctxt.eval("[1, 2, 3]")))
+            self.assertEqual(_PyV8.JSFunction, type(ctxt.eval("(function() {})")))
             self.assertEqual(JSObject, type(ctxt.eval("new Object()")))
 
     def testPythonWrapper(self):
@@ -1297,9 +1308,12 @@ class TestWrapper(unittest.TestCase):
             at test3:1:1"""))
 
     def testStackTrace(self):
+
+        default = JSIsolate.default
+
         class Global(JSClass):
             def GetCurrentStackTrace(self, limit):
-                return JSStackTrace.GetCurrentStackTrace(4, JSStackTrace.Options.Detailed)
+                return default.GetCurrentStackTrace(4, JSStackTrace.Options.Detailed)
 
         with JSContext(Global()) as ctxt:
             st = ctxt.eval("""
@@ -1394,7 +1408,11 @@ class TestWrapper(unittest.TestCase):
             self.assertRaises(TestException, ctxt.eval, "this.raiseExceptions();")
 
     def testArray(self):
-        with JSContext() as ctxt:
+
+        class Global5(JSClass):
+            pass
+
+        with JSContext(Global5()) as ctxt:
             array = ctxt.eval("""
                 var array = new Array();
 
@@ -1710,7 +1728,7 @@ class TestWrapper(unittest.TestCase):
 
                 fn(obj)
 
-                self.assertEqual(4, sys.getrefcount(obj))
+                self.assertEqual(3, sys.getrefcount(obj))
 
                 del obj
 
@@ -1718,7 +1736,7 @@ class TestWrapper(unittest.TestCase):
 
         self.assertFalse(owner.deleted)
 
-        JSEngine.collect()
+        JSIsolate.default.collect(True)
         gc.collect()
 
         self.assertTrue(owner.deleted)
@@ -1859,43 +1877,36 @@ class TestWrapper(unittest.TestCase):
 
 
 class TestMultithread(unittest.TestCase):
-    def testLocker(self):
+    def ________testLocker(self):
         self.assertFalse(JSLocker.active)
-        self.assertFalse(JSLocker.locked)
 
         with JSLocker() as outter_locker:
             self.assertTrue(JSLocker.active)
-            self.assertTrue(JSLocker.locked)
+            self.assertTrue(outter_locker.locked)
 
             self.assertTrue(outter_locker)
 
             with JSLocker() as inner_locker:
-                self.assertTrue(JSLocker.locked)
+                self.assertTrue(inner_locker.locked)
 
                 self.assertTrue(outter_locker)
                 self.assertTrue(inner_locker)
 
                 with JSUnlocker() as unlocker:
-                    self.assertFalse(JSLocker.locked)
+                    self.assertFalse(inner_locker.locked)
 
                     self.assertTrue(outter_locker)
                     self.assertTrue(inner_locker)
 
-                self.assertTrue(JSLocker.locked)
+                self.assertTrue(inner_locker.locked)
 
-        self.assertTrue(JSLocker.active)
-        self.assertFalse(JSLocker.locked)
-
-        locker = JSLocker()
-
-        with JSContext():
-            self.assertRaises(RuntimeError, locker.__enter__)
-            self.assertRaises(RuntimeError, locker.__exit__, None, None, None)
-
-        del locker
+        JSLocker.resetActive()
+        self.assertFalse(JSLocker.active)
 
     def testMultiPythonThread(self):
         import time, threading
+
+        isolate = JSIsolate()
 
         class Global:
             count = 0
@@ -1910,17 +1921,28 @@ class TestMultithread(unittest.TestCase):
         g = Global()
 
         def run():
-            with JSContext(g) as ctxt:
-                ctxt.eval("""
-                    started.wait();
+            locker = JSLocker(isolate)
+            locker.enter()
+            isolate.enter()
 
-                    for (i=0; i<10; i++)
-                    {
-                        sleep(100);
-                    }
+            ctxt = JSContext(g, isolate=isolate)
+            ctxt.enter()
 
-                    finished.release();
-                """)
+            ctxt.eval("""
+                started.wait();
+
+                for (i=0; i<10; i++)
+                {
+                    sleep(100);
+                }
+
+                finished.release();
+            """)
+
+            ctxt.leave()
+            isolate.leave()
+            locker.leave()
+            pass
 
         threading.Thread(target=run).start()
 
@@ -1935,14 +1957,19 @@ class TestMultithread(unittest.TestCase):
 
         self.assertTrue((time.time() - now) >= 1)
 
+        JSLocker.resetActive()
+
+
     def testMultiJavascriptThread(self):
         import time, threading
+
+        isolate = JSIsolate()
 
         class Global:
             result = []
 
             def add(self, value):
-                with JSUnlocker():
+                with JSUnlocker(isolate):
                     time.sleep(0.1)
 
                     self.result.append(value)
@@ -1950,20 +1977,25 @@ class TestMultithread(unittest.TestCase):
         g = Global()
 
         def run():
-            with JSContext(g) as ctxt:
-                ctxt.eval("""
-                    for (i=0; i<10; i++)
-                        add(i);
-                """)
+            with JSLocker(isolate):
+                with isolate:
+
+                    with JSContext(g, isolate=isolate) as ctxt:
+                        ctxt.eval("""
+                            for (i=0; i<10; i++)
+                                add(i);
+                        """)
 
         threads = [threading.Thread(target=run), threading.Thread(target=run)]
 
-        with JSLocker():
-            for t in threads: t.start()
+        for t in threads: t.start()
 
         for t in threads: t.join()
 
         self.assertEqual(20, len(g.result))
+
+        JSLocker.resetActive()
+
 
 class TestEngine(unittest.TestCase):
     def testClassProperties(self):
@@ -2230,8 +2262,9 @@ class TestEngine(unittest.TestCase):
         JSEngine.setMemoryAllocationCallback(None)
 
     def testOutOfMemory(self):
-        with JSIsolate():
-            JSEngine.setMemoryLimit(max_young_space_size=16 * 1024, max_old_space_size=4 * 1024 * 1024)
+
+        with JSIsolate() as isolate:
+            isolate.setMemoryLimit(max_young_space_size=16 * 1024, max_old_space_size=4 * 1024 * 1024)
 
             with JSContext() as ctxt:
                 JSEngine.ignoreOutOfMemoryException()
@@ -2240,19 +2273,18 @@ class TestEngine(unittest.TestCase):
 
                 self.assertTrue(ctxt.hasOutOfMemoryException)
 
-                JSEngine.setMemoryLimit()
-
-                JSEngine.collect()
+                isolate.setMemoryLimit()
+                isolate.collect()
 
     def testStackLimit(self):
-        with JSIsolate():
-            JSEngine.setStackLimit(256 * 1024)
+        with JSIsolate() as isolate:
+            isolate.setStackLimit(256 * 1024)
 
             with JSContext() as ctxt:
                 oldStackSize = ctxt.eval("var maxStackSize = function(i){try{(function m(){++i&&m()}())}catch(e){return i}}(0); maxStackSize")
 
-        with JSIsolate():
-            JSEngine.setStackLimit(512 * 1024)
+        with JSIsolate() as isolate:
+            isolate.setStackLimit(512 * 1024)
 
             with JSContext() as ctxt:
                 newStackSize = ctxt.eval("var maxStackSize = function(i){try{(function m(){++i&&m()}())}catch(e){return i}}(0); maxStackSize")

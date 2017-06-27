@@ -49,3 +49,6 @@ __WINDOWS/
 __MS_WINDOWS/
 .DS_Store
 .directory
+build
+pyv8.xcodeproj/project.xcworkspace/xcuserdata
+pyv8.xcodeproj/xcuserdata

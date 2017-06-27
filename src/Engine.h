@@ -17,9 +17,8 @@ typedef boost::shared_ptr<CScript> CScriptPtr;
 
 class CEngine
 {
-  v8::Isolate *m_isolate;
-
-  static uint32_t *CalcStackLimitSize(uint32_t size);
+private:
+  v8::Isolate* m_isolate;
 protected:
   py::object InternalPreCompile(v8::Handle<v8::String> src);
   CScriptPtr InternalCompile(v8::Handle<v8::String> src, v8::Handle<v8::Value> name, int line, int col, py::object precompiled);
@@ -32,25 +31,26 @@ protected:
   static int *CounterLookup(const char* name);
 #endif
 
-  static void CollectAllGarbage(bool force_compaction);
-  static void TerminateAllThreads(void);
+  static void BindReports(void);
 
   static void ReportFatalError(const char* location, const char* message);
   static void ReportMessage(v8::Handle<v8::Message> message, v8::Handle<v8::Value> data);
 public:
-  CEngine(v8::Isolate *isolate = NULL) : m_isolate(isolate ? isolate : v8::Isolate::GetCurrent()) {}
+  CEngine(CIsolatePtr isolate) : m_isolate(isolate->GetIsolate()) {}
+  CEngine(v8::Isolate* isolate) : m_isolate(isolate) {}
+  CEngine() : m_isolate(v8::Isolate::GetCurrent()) {}
 
   py::object PreCompile(const std::string& src)
   {
     v8::HandleScope scope(m_isolate);
 
-    return InternalPreCompile(ToString(src));
+    return InternalPreCompile(ToString(src, m_isolate));
   }
   py::object PreCompileW(const std::wstring& src)
   {
     v8::HandleScope scope(m_isolate);
 
-    return InternalPreCompile(ToString(src));
+    return InternalPreCompile(ToString(src, m_isolate));
   }
 
   CScriptPtr Compile(const std::string& src, const std::string name = std::string(),
@@ -58,14 +58,14 @@ public:
   {
     v8::HandleScope scope(m_isolate);
 
-    return InternalCompile(ToString(src), ToString(name), line, col, precompiled);
+    return InternalCompile(ToString(src, m_isolate), ToString(name, m_isolate), line, col, precompiled);
   }
   CScriptPtr CompileW(const std::wstring& src, const std::wstring name = std::wstring(),
                       int line = -1, int col = -1, py::object precompiled = py::object())
   {
     v8::HandleScope scope(m_isolate);
 
-    return InternalCompile(ToString(src), ToString(name), line, col, precompiled);
+    return InternalCompile(ToString(src, m_isolate), ToString(name, m_isolate), line, col, precompiled);
   }
 
   void RaiseError(v8::TryCatch& try_catch);
@@ -73,8 +73,6 @@ public:
   static void Expose(void);
 
   static const std::string GetVersion(void) { return v8::V8::GetVersion(); }
-  static bool SetMemoryLimit(int max_young_space_size, int max_old_space_size, int max_executable_size);
-  static bool SetStackLimit(uint32_t stack_limit_size);
 
   py::object ExecuteScript(v8::Handle<v8::Script> script);
 

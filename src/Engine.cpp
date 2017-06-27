@@ -112,14 +112,19 @@ public:
 
 MemoryAllocationManager::CallbackMap MemoryAllocationManager::s_callbacks;
 
-void CEngine::Expose(void)
+void CEngine::BindReports(void)
 {
 #ifndef SUPPORT_SERIALIZE
   v8::V8::SetFatalErrorHandler(ReportFatalError);
   v8::V8::AddMessageListener(ReportMessage);
 #endif
+}
 
+void CEngine::Expose(void)
+{
   MemoryAllocationManager::Init();
+  
+  BindReports();
 
   py::enum_<v8::ObjectSpace>("JSObjectSpace")
     .value("New", v8::kObjectSpaceNewSpace)
@@ -142,8 +147,9 @@ void CEngine::Expose(void)
     .value("STRICT", v8i::STRICT_MODE)
     .value("EXTENDED", v8i::EXTENDED_MODE);
 
-  py::class_<CEngine, boost::noncopyable>("JSEngine", "JSEngine is a backend Javascript engine.")
-    .def(py::init<>("Create a new script engine instance."))
+  py::class_<CEngine, boost::noncopyable>("JSEngine", "JSEngine is a backend Javascript engine.", py::no_init)
+    .def(py::init<>(("Create a new script engine instance for default isolate")))
+    .def(py::init<CIsolatePtr>((py::arg("isolate"), "Create a new script engine instance for required isolate")))
     .add_static_property("version", &CEngine::GetVersion,
                          "Get the V8 engine version.")
 
@@ -152,10 +158,6 @@ void CEngine::Expose(void)
 
     .def("setFlags", &CEngine::SetFlags, "Sets V8 flags from a string.")
     .staticmethod("setFlags")
-
-    .def("collect", &CEngine::CollectAllGarbage, (py::arg("force")=true),
-         "Performs a full garbage collection. Force compaction if the parameter is true.")
-    .staticmethod("collect")
 
   #ifdef SUPPORT_SERIALIZE
     .add_static_property("serializeEnabled", &CEngine::IsSerializeEnabled, &CEngine::SetSerializeEnable)
@@ -166,10 +168,9 @@ void CEngine::Expose(void)
     .def("deserialize", &CEngine::Deserialize)
     .staticmethod("deserialize")
   #endif
-
-    .def("terminateAllThreads", &CEngine::TerminateAllThreads,
-         "Forcefully terminate the current thread of JavaScript execution.")
-    .staticmethod("terminateAllThreads")
+  
+    .def("bindReports", &CEngine::BindReports, "Bind reports")
+    .staticmethod("bindReports")
 
     .def("dispose", &v8::V8::Dispose,
          "Releases any resources used by v8 and stops any utility threads "
@@ -185,22 +186,9 @@ void CEngine::Expose(void)
          "Optional notification that the system is running low on memory.")
     .staticmethod("lowMemory")
 
-    .def("setMemoryLimit", &CEngine::SetMemoryLimit, (py::arg("max_young_space_size") = 0,
-                                                      py::arg("max_old_space_size") = 0,
-                                                      py::arg("max_executable_size") = 0),
-         "Specifies the limits of the runtime's memory use."
-         "You must set the heap size before initializing the VM"
-         "the size cannot be adjusted after the VM is initialized.")
-    .staticmethod("setMemoryLimit")
-
     .def("ignoreOutOfMemoryException", &v8::V8::IgnoreOutOfMemoryException,
          "Ignore out-of-memory exceptions.")
     .staticmethod("ignoreOutOfMemoryException")
-
-    .def("setStackLimit", &CEngine::SetStackLimit, (py::arg("stack_limit_size") = 0),
-         "Uses the address of a local variable to determine the stack top now."
-         "Given a size, returns an address that is that far from the current top of stack.")
-    .staticmethod("setStackLimit")
 
     .def("setMemoryAllocationCallback", &MemoryAllocationManager::SetCallback,
                                         (py::arg("callback"),
@@ -343,22 +331,6 @@ void CEngine::Deserialize(py::object snapshot)
 
 #endif // SUPPORT_SERIALIZE
 
-void CEngine::CollectAllGarbage(bool force_compaction)
-{
-  v8i::HandleScope handle_scope(v8i::Isolate::Current());
-
-  if (force_compaction) {
-    v8i::Isolate::Current()->heap()->CollectAllAvailableGarbage();
-  } else {
-    v8i::Isolate::Current()->heap()->CollectAllGarbage(v8i::Heap::kMakeHeapIterableMask);
-  }
-}
-
-void CEngine::TerminateAllThreads(void)
-{
-  v8::V8::TerminateExecution(v8::Isolate::GetCurrent());
-}
-
 void CEngine::ReportFatalError(const char* location, const char* message)
 {
   std::cerr << "<" << location << "> " << message << std::endl;
@@ -371,42 +343,6 @@ void CEngine::ReportMessage(v8::Handle<v8::Message> message, v8::Handle<v8::Valu
   v8::String::Utf8Value sourceline(message->GetSourceLine());
 
   std::cerr << *filename << ":" << lineno << " -> " << *sourceline << std::endl;
-}
-
-bool CEngine::SetMemoryLimit(int max_young_space_size, int max_old_space_size, int max_executable_size)
-{
-  v8::ResourceConstraints limit;
-
-  if (max_young_space_size) limit.set_max_young_space_size(max_young_space_size);
-  if (max_old_space_size) limit.set_max_old_space_size(max_old_space_size);
-  if (max_executable_size) limit.set_max_executable_size(max_executable_size);
-
-  return v8::SetResourceConstraints(v8::Isolate::GetCurrent(), &limit);
-}
-
-// Uses the address of a local variable to determine the stack top now.
-// Given a size, returns an address that is that far from the current
-// top of stack.
-uint32_t *CEngine::CalcStackLimitSize(uint32_t size)
-{
-  uint32_t* answer = &size - (size / sizeof(size));
-
-  // If the size is very large and the stack is very near the bottom of
-  // memory then the calculation above may wrap around and give an address
-  // that is above the (downwards-growing) stack.  In that case we return
-  // a very low address.
-  if (answer > &size) return reinterpret_cast<uint32_t*>(sizeof(size));
-
-  return answer;
-}
-
-bool CEngine::SetStackLimit(uint32_t stack_limit_size)
-{
-  v8::ResourceConstraints limit;
-
-  limit.set_stack_limit(CalcStackLimitSize(stack_limit_size));
-
-  return v8::SetResourceConstraints(v8::Isolate::GetCurrent(), &limit);
 }
 
 py::object CEngine::InternalPreCompile(v8::Handle<v8::String> src)
@@ -531,7 +467,7 @@ py::object CEngine::ExecuteScript(v8::Handle<v8::Script> script)
     result = v8::Null(m_isolate);
   }
 
-  return CJavascriptObject::Wrap(result);
+  return CJavascriptObject::Wrap(result, m_isolate);
 }
 
 #ifdef SUPPORT_AST
@@ -595,7 +531,8 @@ class CPythonExtension : public v8::Extension
 
   static void CallStub(const v8::FunctionCallbackInfo<v8::Value>& args)
   {
-    v8::HandleScope handle_scope(args.GetIsolate());
+    v8::Isolate* isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(isolate);
     CPythonGIL python_gil;
     py::object func = *static_cast<py::object *>(v8::External::Cast(*args.Data())->Value());
 
@@ -604,26 +541,26 @@ class CPythonExtension : public v8::Extension
     switch (args.Length())
     {
     case 0: result = func(); break;
-    case 1: result = func(CJavascriptObject::Wrap(args[0])); break;
-    case 2: result = func(CJavascriptObject::Wrap(args[0]), CJavascriptObject::Wrap(args[1])); break;
-    case 3: result = func(CJavascriptObject::Wrap(args[0]), CJavascriptObject::Wrap(args[1]),
-                          CJavascriptObject::Wrap(args[2])); break;
-    case 4: result = func(CJavascriptObject::Wrap(args[0]), CJavascriptObject::Wrap(args[1]),
-                          CJavascriptObject::Wrap(args[2]), CJavascriptObject::Wrap(args[3])); break;
-    case 5: result = func(CJavascriptObject::Wrap(args[0]), CJavascriptObject::Wrap(args[1]),
-                          CJavascriptObject::Wrap(args[2]), CJavascriptObject::Wrap(args[3]),
-                          CJavascriptObject::Wrap(args[4])); break;
-    case 6: result = func(CJavascriptObject::Wrap(args[0]), CJavascriptObject::Wrap(args[1]),
-                          CJavascriptObject::Wrap(args[2]), CJavascriptObject::Wrap(args[3]),
-                          CJavascriptObject::Wrap(args[4]), CJavascriptObject::Wrap(args[5])); break;
-    case 7: result = func(CJavascriptObject::Wrap(args[0]), CJavascriptObject::Wrap(args[1]),
-                          CJavascriptObject::Wrap(args[2]), CJavascriptObject::Wrap(args[3]),
-                          CJavascriptObject::Wrap(args[4]), CJavascriptObject::Wrap(args[5]),
-                          CJavascriptObject::Wrap(args[6])); break;
-    case 8: result = func(CJavascriptObject::Wrap(args[0]), CJavascriptObject::Wrap(args[1]),
-                          CJavascriptObject::Wrap(args[2]), CJavascriptObject::Wrap(args[3]),
-                          CJavascriptObject::Wrap(args[4]), CJavascriptObject::Wrap(args[5]),
-                          CJavascriptObject::Wrap(args[7]), CJavascriptObject::Wrap(args[8])); break;
+    case 1: result = func(CJavascriptObject::Wrap(args[0], isolate)); break;
+    case 2: result = func(CJavascriptObject::Wrap(args[0], isolate), CJavascriptObject::Wrap(args[1], isolate)); break;
+    case 3: result = func(CJavascriptObject::Wrap(args[0], isolate), CJavascriptObject::Wrap(args[1], isolate),
+                          CJavascriptObject::Wrap(args[2], isolate)); break;
+    case 4: result = func(CJavascriptObject::Wrap(args[0], isolate), CJavascriptObject::Wrap(args[1], isolate),
+                          CJavascriptObject::Wrap(args[2], isolate), CJavascriptObject::Wrap(args[3], isolate)); break;
+    case 5: result = func(CJavascriptObject::Wrap(args[0], isolate), CJavascriptObject::Wrap(args[1], isolate),
+                          CJavascriptObject::Wrap(args[2], isolate), CJavascriptObject::Wrap(args[3], isolate),
+                          CJavascriptObject::Wrap(args[4], isolate)); break;
+    case 6: result = func(CJavascriptObject::Wrap(args[0], isolate), CJavascriptObject::Wrap(args[1], isolate),
+                          CJavascriptObject::Wrap(args[2], isolate), CJavascriptObject::Wrap(args[3], isolate),
+                          CJavascriptObject::Wrap(args[4], isolate), CJavascriptObject::Wrap(args[5], isolate)); break;
+    case 7: result = func(CJavascriptObject::Wrap(args[0], isolate), CJavascriptObject::Wrap(args[1], isolate),
+                          CJavascriptObject::Wrap(args[2], isolate), CJavascriptObject::Wrap(args[3], isolate),
+                          CJavascriptObject::Wrap(args[4], isolate), CJavascriptObject::Wrap(args[5], isolate),
+                          CJavascriptObject::Wrap(args[6], isolate)); break;
+    case 8: result = func(CJavascriptObject::Wrap(args[0], isolate), CJavascriptObject::Wrap(args[1], isolate),
+                          CJavascriptObject::Wrap(args[2], isolate), CJavascriptObject::Wrap(args[3], isolate),
+                          CJavascriptObject::Wrap(args[4], isolate), CJavascriptObject::Wrap(args[5], isolate),
+                          CJavascriptObject::Wrap(args[7], isolate), CJavascriptObject::Wrap(args[8], isolate)); break;
     default:
       args.GetIsolate()->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8(args.GetIsolate(), "too many arguments")));
       break;
@@ -636,7 +573,7 @@ class CPythonExtension : public v8::Extension
     } else if (result.ptr() == Py_False) {
       args.GetReturnValue().Set(false);
     } else {
-      args.GetReturnValue().Set(CPythonObject::Wrap(result));
+      args.GetReturnValue().Set(CPythonObject::Wrap(result, isolate));
     }
   }
 public:

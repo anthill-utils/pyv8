@@ -17,10 +17,14 @@ class CIsolate
 {
   v8::Isolate *m_isolate;
   bool m_owner;
+  
+private:
+  static uint32_t *CalcStackLimitSize(uint32_t size);
+  
 public:
-  CIsolate(bool owner=false) : m_owner(owner) { m_isolate = v8::Isolate::New(); }
-  CIsolate(v8::Isolate *isolate) : m_isolate(isolate), m_owner(false) {}
-  ~CIsolate(void) { if (m_owner) m_isolate->Dispose(); }
+  CIsolate(bool owner=false);
+  CIsolate(v8::Isolate *isolate);
+  ~CIsolate(void);
 
   v8::Isolate *GetIsolate(void) { return m_isolate; }
 
@@ -28,12 +32,24 @@ public:
     v8::StackTrace::StackTraceOptions options = v8::StackTrace::kOverview) {
     return CJavascriptStackTrace::GetCurrentStackTrace(m_isolate, frame_limit, options);
   }
+  
+  void Terminate();
 
-  static py::object GetCurrent(void);
-
-  void Enter(void) { m_isolate->Enter(); }
-  void Leave(void) { m_isolate->Exit(); }
-  void Dispose(void) { m_isolate->Dispose(); }
+  void Enter(void);
+  void Leave(void);
+  void Dispose(void);
+  
+  void CollectAllGarbage(bool force_compaction);
+  bool SetMemoryLimit(int max_young_space_size, int max_old_space_size, int max_executable_size);
+  bool SetStackLimit(uint32_t stack_limit_size);
+  
+  static py::object GetDefault(void);
+  
+  py::object GetEntered(void);
+  py::object GetCurrent(void);
+  py::object GetCalling(void);
+  
+  bool InContext(void) { return m_isolate->InContext(); }
 
   bool IsLocked(void) { return v8::Locker::IsLocked(m_isolate); }
 };
@@ -42,38 +58,51 @@ class CContext
 {
   py::object m_global;
   v8::Persistent<v8::Context> m_context;
+  v8::Isolate* m_isolate;
+
+protected:
+  void Init(py::list extensions);
+
 public:
   CContext(v8::Handle<v8::Context> context);
   CContext(const CContext& context);
-  CContext(py::object global, py::list extensions);
+
+  CContext(py::object global, py::list extensions) :
+    m_global(global),
+    m_isolate(v8::Isolate::GetCurrent())
+  {
+    Init(extensions);
+  };
+
+  CContext(py::object global, py::list extensions, CIsolatePtr isolate) :
+    m_global(global),
+    m_isolate(isolate->GetIsolate())
+  {
+    Init(extensions);
+  };
 
   ~CContext()
   {
     m_context.Reset();
   }
 
-  v8::Handle<v8::Context> Handle(void) const { return v8::Local<v8::Context>::New(v8::Isolate::GetCurrent(), m_context); }
-
   py::object GetGlobal(void);
 
   py::str GetSecurityToken(void);
   void SetSecurityToken(py::str token);
 
-  bool IsEntered(void) { return !m_context.IsEmpty(); }
-  void Enter(void) { v8::HandleScope handle_scope(v8::Isolate::GetCurrent()); Handle()->Enter(); }
-  void Leave(void) { v8::HandleScope handle_scope(v8::Isolate::GetCurrent()); Handle()->Exit(); }
+  v8::Handle<v8::Context> Handle(void) const;
+  
+  bool IsEntered(void);
+  void Enter(void);
+  void Leave(void);
 
-  bool HasOutOfMemoryException(void) { v8::HandleScope handle_scope(v8::Isolate::GetCurrent()); return Handle()->HasOutOfMemoryException(); }
+  bool HasOutOfMemoryException(void);
 
   py::object Evaluate(const std::string& src, const std::string name = std::string(),
-                      int line = -1, int col = -1, py::object precompiled = py::object(), long timeout = 0);
+                      int line = -1, int col = -1, py::object precompiled = py::object());
   py::object EvaluateW(const std::wstring& src, const std::wstring name = std::wstring(),
-                       int line = -1, int col = -1, py::object precompiled = py::object(), long timeout = 0);
-
-  static py::object GetEntered(void);
-  static py::object GetCurrent(void);
-  static py::object GetCalling(void);
-  static bool InContext(void) { return v8::Isolate::GetCurrent()->InContext(); }
+                       int line = -1, int col = -1, py::object precompiled = py::object());
 
   static void Expose(void);
 };

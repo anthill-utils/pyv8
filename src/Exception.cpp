@@ -76,13 +76,6 @@ void CJavascriptException::Expose(void)
     ExceptionTranslator::Construct, py::type_id<CJavascriptException>());
 }
 
-void CJavascriptTimeoutException::Expose(void)
-{
-  py::class_<CJavascriptTimeoutException >("_JSTimeoutError", py::no_init);
-    
-  py::register_exception_translator<CJavascriptTimeoutException>(ExceptionTranslator::TranslateTimeout);
-}
-
 CJavascriptStackTracePtr CJavascriptStackTrace::GetCurrentStackTrace(
   v8::Isolate *isolate, int frame_limit, v8::StackTrace::StackTraceOptions options)
 {
@@ -397,22 +390,6 @@ void ExceptionTranslator::Translate(CJavascriptException const& ex)
 
     ::PyErr_SetObject(clazz.ptr(), py::incref(err.ptr()));
   }
-}
-
-void ExceptionTranslator::TranslateTimeout(CJavascriptTimeoutException const& ex)
-{
-  CPythonGIL python_gil;
-
-  // Boost::Python doesn't support inherite from Python class,
-  // so, just use some workaround to throw our custom exception
-  //
-  // http://www.language-binding.net/pyplusplus/troubleshooting_guide/exceptions/exceptions.html
-
-  py::object impl(ex);
-  py::object clazz = impl.attr("_jsclass");
-  py::object err = clazz(impl);
-
-  ::PyErr_SetObject(clazz.ptr(), py::incref(err.ptr()));
 }
 
 void *ExceptionTranslator::Convertible(PyObject* obj)

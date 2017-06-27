@@ -143,9 +143,6 @@ boost_libs = ['boost_python', 'boost_thread', 'boost_system']
 if BOOST_MT:
     boost_libs = [lib + '-mt' for lib in boost_libs]
 
-if DEBUG:
-    boost_libs = [lib + '-d' for lib in boost_libs]
-
 include_dirs = [
     os.path.join(V8_HOME, 'include'),
     V8_HOME,
@@ -509,8 +506,9 @@ def build_v8():
         options = ' '.join(["%s=%s" % (k, v) for k, v in options.items()])
 
         cmdline = "%s -j 8 %s %s.%s" % (MAKE, options, arch, mode)
-
-        exec_cmd(cmdline, "build v8 from SVN")
+        succeeded, out, err = exec_cmd(cmdline, "build v8 from SVN")
+        if not succeeded:
+            exit()
 
 
 def generate_probes():

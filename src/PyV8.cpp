@@ -12,7 +12,6 @@
 BOOST_PYTHON_MODULE(_PyV8)
 {
   CJavascriptException::Expose();
-  CJavascriptTimeoutException::Expose();
   CWrapper::Expose(); 
   CContext::Expose();
 #ifdef SUPPORT_AST

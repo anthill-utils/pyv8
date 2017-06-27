@@ -19,12 +19,10 @@
 #define END_HANDLE_JAVASCRIPT_EXCEPTION if (try_catch.HasCaught()) CJavascriptException::ThrowIf(v8::Isolate::GetCurrent(), try_catch);
 
 class CJavascriptException;
-class CJavascriptTimeoutException;
 
 struct ExceptionTranslator
 {
   static void Translate(CJavascriptException const& ex);
-  static void TranslateTimeout(CJavascriptTimeoutException const& ex);
 
   static void *Convertible(PyObject* obj);
   static void Construct(PyObject* obj, py::converter::rvalue_from_python_stage1_data* data);
@@ -177,23 +175,6 @@ public:
   void PrintCallStack(py::object file);
 
   static void ThrowIf(v8::Isolate *isolate, v8::TryCatch& try_catch);
-
-  static void Expose(void);
-};
-
-
-class CJavascriptTimeoutException : public std::runtime_error
-{
-public:
-  CJavascriptTimeoutException(const std::string& msg) :
-    std::runtime_error(msg)
-  {
-  }
-  
-  CJavascriptTimeoutException(const CJavascriptTimeoutException& ex)
-    : std::runtime_error(ex.what())
-  {
-  }
 
   static void Expose(void);
 };

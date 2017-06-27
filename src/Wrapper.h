@@ -10,6 +10,9 @@
 
 class CJavascriptObject;
 class CJavascriptFunction;
+class CIsolate;
+
+typedef boost::shared_ptr<CIsolate> CIsolatePtr;
 
 typedef boost::shared_ptr<CJavascriptObject> CJavascriptObjectPtr;
 typedef boost::shared_ptr<CJavascriptFunction> CJavascriptFunctionPtr;
@@ -42,12 +45,12 @@ protected:
   static void SetupObjectTemplate(v8::Isolate *isolate, v8::Handle<v8::ObjectTemplate> clazz);
   static v8::Handle<v8::ObjectTemplate> CreateObjectTemplate(v8::Isolate *isolate);
 
-  static v8::Handle<v8::Value> WrapInternal(py::object obj);
+  static v8::Handle<v8::Value> WrapInternal(py::object obj, v8::Isolate* isolate);
 public:
   static bool IsWrapped(v8::Handle<v8::Object> obj);
-  static v8::Handle<v8::Value> Wrap(py::object obj);
-  static py::object Unwrap(v8::Handle<v8::Object> obj);
-  static void Dispose(v8::Handle<v8::Value> value);
+  static v8::Handle<v8::Value> Wrap(py::object obj, v8::Isolate* isolate);
+  static py::object Unwrap(v8::Handle<v8::Object> obj, v8::Isolate* isolate);
+  static void Dispose(v8::Handle<v8::Value> value, v8::Isolate* isolate);
 
   static void ThrowIf(v8::Isolate* isolate);
 };
@@ -61,16 +64,25 @@ class CJavascriptObject : public CWrapper
 {
 protected:
   v8::Persistent<v8::Object> m_obj;
+  v8::Isolate* m_isolate;
 
   void CheckAttr(v8::Handle<v8::String> name) const;
 
-  CJavascriptObject()
+  CJavascriptObject(v8::Isolate* isolate) :
+    m_isolate(isolate)
   {
 
   }
 public:
+  CJavascriptObject(v8::Isolate* isolate, v8::Handle<v8::Object> obj)
+    : m_obj(isolate, obj),
+    m_isolate(isolate)
+  {
+  }
+  
   CJavascriptObject(v8::Handle<v8::Object> obj)
-    : m_obj(v8::Isolate::GetCurrent(), obj)
+    : m_obj(v8::Isolate::GetCurrent(), obj),
+    m_isolate(v8::Isolate::GetCurrent())
   {
   }
 
@@ -79,7 +91,7 @@ public:
     m_obj.Reset();
   }
 
-  v8::Local<v8::Object> Object(void) const { return v8::Local<v8::Object>::New(v8::Isolate::GetCurrent(), m_obj); }
+  v8::Local<v8::Object> Object(void) const { return v8::Local<v8::Object>::New(m_isolate, m_obj); }
 
   py::object GetAttr(const std::string& name);
   void SetAttr(const std::string& name, py::object value);
@@ -101,16 +113,19 @@ public:
 
   void Dump(std::ostream& os) const;
 
-  static py::object Wrap(CJavascriptObject *obj);
-  static py::object Wrap(v8::Handle<v8::Value> value,
+  static py::object Wrap(CJavascriptObject *obj, v8::Isolate* isolate);
+  static py::object Wrap(v8::Handle<v8::Value> value, v8::Isolate* isolate,
     v8::Handle<v8::Object> self = v8::Handle<v8::Object>());
-  static py::object Wrap(v8::Handle<v8::Object> obj,
+  static py::object Wrap(v8::Handle<v8::Object> obj, v8::Isolate* isolate,
     v8::Handle<v8::Object> self = v8::Handle<v8::Object>());
 };
 
 class CJavascriptNull : public CJavascriptObject
 {
 public:
+  CJavascriptNull(CIsolatePtr isolate);
+  CJavascriptNull();
+  
   bool nonzero(void) const { return false; }
   const std::string str(void) const { return "null"; }
 };
@@ -118,6 +133,9 @@ public:
 class CJavascriptUndefined : public CJavascriptObject
 {
 public:
+  CJavascriptUndefined(CIsolatePtr isolate);
+  CJavascriptUndefined();
+  
   bool nonzero(void) const { return false; }
   const std::string str(void) const { return "undefined"; }
 };
@@ -126,6 +144,7 @@ class CJavascriptArray : public CJavascriptObject, public ILazyObject
 {
   py::object m_items;
   size_t m_size;
+  
 public:
   class ArrayIterator
     : public boost::iterator_facade<ArrayIterator, py::object const, boost::forward_traversal_tag, py::object>
@@ -145,16 +164,9 @@ public:
     reference dereference() const { return m_array->GetItem(py::long_(m_idx)); }
   };
 
-  CJavascriptArray(v8::Handle<v8::Array> array)
-    : CJavascriptObject(array), m_size(array->Length())
-  {
-
-  }
-
-  CJavascriptArray(py::object items)
-    : m_items(items), m_size(0)
-  {
-  }
+  CJavascriptArray(v8::Isolate* isolate, v8::Handle<v8::Array> array);
+  CJavascriptArray(CIsolatePtr isolate, py::object items);
+  CJavascriptArray(py::object items);
 
   size_t Length(void);
 
@@ -176,8 +188,8 @@ class CJavascriptFunction : public CJavascriptObject
 
   py::object Call(v8::Handle<v8::Object> self, py::list args, py::dict kwds);
 public:
-  CJavascriptFunction(v8::Handle<v8::Object> self, v8::Handle<v8::Function> func)
-    : CJavascriptObject(func), m_self(v8::Isolate::GetCurrent(), self)
+  CJavascriptFunction(v8::Isolate* isolate, v8::Handle<v8::Object> self, v8::Handle<v8::Function> func)
+    : CJavascriptObject(isolate, func), m_self(v8::Isolate::GetCurrent(), self)
   {
   }
 
@@ -189,10 +201,10 @@ public:
   v8::Handle<v8::Object> Self(void) const { return v8::Local<v8::Object>::New(v8::Isolate::GetCurrent(), m_self); }
 
   static py::object CallWithArgs(py::tuple args, py::dict kwds);
-  static py::object CreateWithArgs(CJavascriptFunctionPtr proto, py::tuple args, py::dict kwds);
+  static py::object CreateWithArgs(CJavascriptFunctionPtr proto, py::tuple args, py::dict kwds, CIsolatePtr isolate = CIsolatePtr());
 
-  py::object ApplyJavascript(CJavascriptObjectPtr self, py::list args, py::dict kwds, py::long_ timeout);
-  py::object ApplyPython(py::object self, py::list args, py::dict kwds, py::long_ timeout);
+  py::object ApplyJavascript(CJavascriptObjectPtr self, py::list args, py::dict kwds);
+  py::object ApplyPython(py::object self, py::list args, py::dict kwds);
   py::object Invoke(py::list args, py::dict kwds);
 
   const std::string GetName(void) const;

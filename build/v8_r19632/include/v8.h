@@ -5212,6 +5212,11 @@ class V8_EXPORT Locker {
    */
   static bool IsActive();
 
+  /**
+   * Unmark the v8::Locker as ever being used to disable checks
+   */
+  static void ResetActive();
+
  private:
   void Initialize(Isolate* isolate);
 

@@ -7,10 +7,15 @@
 
 #include <v8-debug.h>
 
+class CIsolate;
+
+typedef boost::shared_ptr<CIsolate> CIsolatePtr;
+
 class CDebug
 {
   bool m_enabled;
 
+  
   py::object m_onDebugEvent;
   py::object m_onDebugMessage;
   py::object m_onDispatchDebugMessages;
@@ -27,6 +32,7 @@ public:
   {
     Init();
   }
+  virtual ~CDebug();
 
   v8::Handle<v8::Context> DebugContext() const { return v8::Local<v8::Context>::New(v8::Isolate::GetCurrent(), m_debug_context); }
   v8::Handle<v8::Context> EvalContext() const { return v8::Local<v8::Context>::New(v8::Isolate::GetCurrent(), m_eval_context); }
@@ -45,12 +51,7 @@ public:
   py::object GetDebugContext(void);
   py::object GetEvalContext(void);
 
-  static CDebug& GetInstance(void)
-  {
-    static CDebug s_instance;
-
-    return s_instance;
-  }
+  static CDebug& GetInstance(void);
 
   static void Expose(void);
 };

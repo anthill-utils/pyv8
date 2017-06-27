@@ -3,6 +3,8 @@
 #include <sstream>
 #include <string>
 
+#include <boost/thread/tss.hpp>
+
 #ifdef SUPPORT_DEBUGGER
   #include "V8Internal.h"
 #endif
@@ -56,6 +58,26 @@ void CDebug::SetEnable(bool enable)
     }
     END_HANDLE_JAVASCRIPT_EXCEPTION
   }
+  else
+  {
+    BEGIN_HANDLE_JAVASCRIPT_EXCEPTION
+    {
+      v8::Debug::SetDebugEventListener2(NULL);
+      v8::Debug::SetMessageHandler2(NULL);
+      v8::Debug::SetDebugMessageDispatchHandler(NULL);
+    }
+    END_HANDLE_JAVASCRIPT_EXCEPTION
+  }
+}
+
+CDebug::~CDebug()
+{
+    if (m_enabled)
+    {
+        v8::Debug::SetDebugEventListener2(NULL);
+        v8::Debug::SetMessageHandler2(NULL);
+        v8::Debug::SetDebugMessageDispatchHandler(NULL);
+    }
 }
 
 py::object CDebug::GetDebugContext(void)
@@ -113,8 +135,8 @@ void CDebug::OnDebugEvent(const v8::Debug::EventDetails& details)
   BEGIN_HANDLE_PYTHON_EXCEPTION
   {
     py::call<void>(pThis->m_onDebugEvent.ptr(), details.GetEvent(),
-      CJavascriptObjectPtr(new CJavascriptObject(details.GetExecutionState())),
-      CJavascriptObjectPtr(new CJavascriptObject(details.GetEventData())));
+      CJavascriptObjectPtr(new CJavascriptObject(v8::Isolate::GetCurrent(), details.GetExecutionState())),
+      CJavascriptObjectPtr(new CJavascriptObject(v8::Isolate::GetCurrent(), details.GetEventData())));
   }
   END_HANDLE_PYTHON_EXCEPTION
 }
@@ -174,6 +196,17 @@ void CDebug::DebugBreakForCommand(py::object data)
     v8::Debug::DebugBreakForCommand(data.is_none() ? NULL : new DebugClientData(data));
   }
   END_HANDLE_JAVASCRIPT_EXCEPTION
+}
+
+CDebug& CDebug::GetInstance(void)
+{
+    static boost::thread_specific_ptr< CDebug > s_instance;
+    
+    if( !s_instance.get() ) {
+        s_instance.reset( new CDebug() );
+    }
+    
+    return *s_instance.get();
 }
 
 void CDebug::Expose(void)
