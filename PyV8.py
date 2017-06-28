@@ -1877,7 +1877,7 @@ class TestWrapper(unittest.TestCase):
 
 
 class TestMultithread(unittest.TestCase):
-    def ________testLocker(self):
+    def testLocker(self):
         self.assertFalse(JSLocker.active)
 
         with JSLocker() as outter_locker:
